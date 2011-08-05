@@ -13,65 +13,31 @@ module Sock
     def initialize(object)
       @described = object
       @events = []
+      @mode = :mock
     end
 
     def stub
-      SockStubber.new(self)
-    end
-
-    def record_and_do(record_type, method_name, args)
-      @events << [record_type, {:method => method_name, :args => args}]
-      @described.send(method_name, *args)
+      stubber = self.clone # new instance shares the same event list
+      stubber.instance_eval do
+        @mode = :stub
+      end
+      stubber
     end
 
     def method_missing(name, *args)
-      SockAsserter.new(self, name, args)
-    end
-
-    def add_result(result)
-      @events.last[1][:result] = result
+      @described.send(name, *args).tap do |result| 
+        @events << [@mode, {:method => name, :args => args, :result => result}]
+      end
     end
 
     def run_events
       @events.each do |record_type, record_details|
         mock_method = record_type.to_sym == :mock ? :should_receive : :stub
-        mock = @described.send(mock_method, record_details[:method]).with(*record_details[:args])
-        if record_details.include?(:result)
-          mock.and_return(record_details[:result])
-        end
+        @described.send(mock_method, record_details[:method]).with(*record_details[:args]).and_return(record_details[:result])
       end
       @described
     end
   end
-
-  class SockStubber
-    def initialize(sock)
-      @sock = sock
-    end
-
-    def method_missing(name, *args)
-      @sock.record_and_do(:stub, name, *args)
-    end
-  end
-
-  class SockAsserter
-    def initialize(sock, name, args)
-      @sock = sock
-      @name = name
-      @args = args
-    end
-
-    def should
-      self
-    end
-
-    def ==(matcher)
-      result = @sock.record_and_do(:mock, @name, @args)
-      @sock.add_result(result)
-      result.should == matcher
-    end
-  end
-
 
   class SockDrawer
     def self.drawer
